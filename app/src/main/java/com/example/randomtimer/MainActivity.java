@@ -2,8 +2,11 @@ package com.example.randomtimer;
 
 import androidx.appcompat.app.AppCompatActivity;
 
+import android.media.AudioAttributes;
+import android.media.SoundPool;
 import android.os.Bundle;
 import android.os.CountDownTimer;
+import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
@@ -17,31 +20,30 @@ import java.util.Random;
 public class MainActivity extends AppCompatActivity {
 
     private EditText roundMin, roundMax, restMin, restMax, repeat;
-    private TextView countDown, test;
+    private TextView countDown, restTimeIndicator;
     private Button goBtn;
 
-    private long roundTimeLeftInMillis = 0;
-    private long restTimeLeftMillis = 0;
+    private long countDownTimeLeftInMillis = 0;
 
     private List<Integer> roundTimes = new ArrayList<>();
     private List<Integer> restTimes = new ArrayList<>();
 
     private CountDownTimer countDownTimer;
-    private CountDownTimer countDownTimer2;
 
-    //ყველაფერი უნდა იწყებოდეს დასვენების დროით
-    //სანამ ახლიდან დაიწყება ლისტები უნდა დავაქელარო
+    private boolean restTimeIsRunning = false;
+
+    private SoundPool soundPool;
+    private int soundStart, soundRest;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        test = findViewById(R.id.rest_count_down);
 
         initUI();
+        createSoundPools();
         clickListener();
-
     }
 
     private void initUI() {
@@ -52,14 +54,43 @@ public class MainActivity extends AppCompatActivity {
         repeat = findViewById(R.id.repeat_counter_id);
         goBtn = findViewById(R.id.goBtn);
         countDown = findViewById(R.id.count_down_id);
+        restTimeIndicator = findViewById(R.id.rest_time_indicator);
+    }
+
+    private void createSoundPools() {
+        AudioAttributes audioAttributes = new AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build();
+
+        soundPool = new SoundPool.Builder().setMaxStreams(2)
+                .setAudioAttributes(audioAttributes)
+                .build();
+
+        soundStart = soundPool.load(this, R.raw.start, 1);
+        soundRest = soundPool.load(this, R.raw.rest, 1);
     }
 
     private void takeInputs() {
+
         String rndMin = roundMin.getText().toString().trim();
         String rndMax = roundMax.getText().toString().trim();
         String rstMin = restMin.getText().toString().trim();
         String rstMax = restMax.getText().toString().trim();
         String rpt = repeat.getText().toString().trim();
+
+
+        try {
+            int intRoundMin = Integer.parseInt(rndMin);
+            int intRoundMax = Integer.parseInt(rndMax);
+            int intRestMin = Integer.parseInt(rstMin);
+            int intRestMax = Integer.parseInt(rstMax);
+
+            int intRepeat = Integer.parseInt(rpt);
+        } catch (NumberFormatException e) {
+            Toast.makeText(this, "All field must be filled correctly", Toast.LENGTH_SHORT).show();
+            return;
+        }
 
         int intRoundMin = Integer.parseInt(rndMin);
         int intRoundMax = Integer.parseInt(rndMax);
@@ -68,6 +99,8 @@ public class MainActivity extends AppCompatActivity {
 
         int intRepeat = Integer.parseInt(rpt);
 
+
+        //ამით ვამოწმებ შემოსული რიცხვები ხო სწორია და მერე აღარ ვიყენებ არაფერში
         int roundTime = getRandomNumberInRange(intRoundMin, intRoundMax);
         int restTime = getRandomNumberInRange(intRestMin, intRestMax);
 
@@ -86,17 +119,14 @@ public class MainActivity extends AppCompatActivity {
         } else {
             //თუ შეყვანილი ინფორმაცია სწორია ლისტებში ჩაყრის დროებს
             for (int i = 0; i < intRepeat; i++) {
-                restTimes.add(getRandomNumberInRange(intRoundMin, intRoundMax));
+                restTimes.add(getRandomNumberInRange(intRestMin, intRestMax));
                 roundTimes.add(getRandomNumberInRange(intRoundMin, intRoundMax));
             }
         }
 
-        //აქ პირველი უნდა გავუშვა დასვენების დრო და დასვენების დროიდან უნდა გამოვიძახო რაუნდის დრო
-//        timeLeftInMillis = roundTimes.get(0) * 1000;
-//        startRoundTimer();
-
-        restTimeLeftMillis = restTimes.get(0);
-        startRestTimer();
+        restTimeIsRunning = true;
+        restTimeIndicator.setVisibility(View.VISIBLE);
+        startCountDown();
 
     }
 
@@ -116,67 +146,78 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    int roundRepeatCounter = 1;
-    private void startRoundTimer() {
-        countDownTimer = new CountDownTimer(roundTimeLeftInMillis, 1000) {
+    int roundRepeatCounter = 0;
+    int restRepeatCounter = 0;
+
+    private void startCountDown() {
+        if (roundRepeatCounter >= roundTimes.size()) {
+            roundTimes.clear();
+            roundRepeatCounter = 0;
+            restTimes.clear();
+            restRepeatCounter = 0;
+            restTimeIndicator.setVisibility(View.INVISIBLE);
+            soundPool.play(soundRest, 1, 1, 0, 0, 1);
+            return;
+        }
+
+        if (restTimeIsRunning) {
+            if (restRepeatCounter != 0) {
+                soundPool.play(soundRest, 1, 1, 0, 0, 1);
+            }
+        } else {
+            soundPool.play(soundStart, 1, 1, 0, 0, 1);
+        }
+
+        if (restTimeIsRunning) {
+            countDownTimeLeftInMillis = restTimes.get(restRepeatCounter) * 1000;
+            restRepeatCounter++;
+        } else {
+            countDownTimeLeftInMillis = roundTimes.get(roundRepeatCounter) * 1000;
+            roundRepeatCounter++;
+        }
+
+        countDownTimer = new CountDownTimer(countDownTimeLeftInMillis, 1000) {
             @Override
             public void onTick(long l) {
-                roundTimeLeftInMillis = l;
-                updateCountDownText();
+                if (restTimeIsRunning) {
+                    countDownTimeLeftInMillis = l;
+                    //აქ უნდა გავაკეთ რაღაც ანიმაცია რომელიც კითხვის ნიშნებს აანთებს და ჩააქრობს
+//                    updateRestTimeCountDown();
+                } else {
+                    countDownTimeLeftInMillis = l;
+                    updateRoundTimeCountDown();
+                }
             }
 
             @Override
             public void onFinish() {
-                if(roundRepeatCounter < roundTimes.size()){
-                    roundTimeLeftInMillis = roundTimes.get(roundRepeatCounter) * 1000;
-                    startRestTimer();
-                    roundRepeatCounter++;
-                }else{
-                    roundRepeatCounter = 0;
+                if (restTimeIsRunning) {
+                    restTimeIsRunning = false;
+                    restTimeIndicator.setVisibility(View.INVISIBLE);
+                    startCountDown();
+                } else {
+                    restTimeIsRunning = true;
+                    restTimeIndicator.setVisibility(View.VISIBLE);
+                    startCountDown();
                 }
             }
         }.start();
     }
 
-    int restRepeatCounter = 1;
-    private void startRestTimer(){
-        countDownTimer2 = new CountDownTimer(restTimeLeftMillis, 1000) {
-            @Override
-            public void onTick(long l) {
-                restTimeLeftMillis = l;
-                //აქ უნდა გავაკეთ რაღაც ანიმაცია რომელიც კითხვის ნიშნებს აანთებს და ჩააქრობს
-                testCountdown();
-            }
 
-            @Override
-            public void onFinish() {
-                //აედან უნდა გამოვიძახო startRoundTimer;
-                if(restRepeatCounter < restTimes.size()){
-                    roundTimeLeftInMillis = restTimes.get(restRepeatCounter) * 1000;
-                    startRoundTimer();
-                    roundRepeatCounter++;
-                }else{
-                    roundRepeatCounter = 0;
-                }
-            }
-        }.start();
-    }
-
-    private void updateCountDownText() {
-        int minutes = (int) (roundTimeLeftInMillis / 1000) / 60;
-        int seconds = (int) (roundTimeLeftInMillis / 1000) % 60;
+    private void updateRoundTimeCountDown() {
+        int minutes = (int) (countDownTimeLeftInMillis / 1000) / 60;
+        int seconds = (int) (countDownTimeLeftInMillis / 1000) % 60;
 
         String timeLeftFormatted = String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds);
-
         countDown.setText(timeLeftFormatted);
     }
 
-    private void testCountdown() {
-        int minutes = (int) (restTimeLeftMillis / 1000) / 60;
-        int seconds = (int) (restTimeLeftMillis / 1000) % 60;
-
-        String timeLeftFormatted = String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds);
-
-        test.setText(timeLeftFormatted);
-    }
+    //ამ დროის Ui ში დახატვა არ დამჭირდება სატესტოა
+//    private void updateRestTimeCountDown() {
+//        int minutes = (int) (countDownTimeLeftInMillis / 1000) / 60;
+//        int seconds = (int) (countDownTimeLeftInMillis / 1000) % 60;
+//        String timeLeftFormatted = String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds);
+//        test.setText(timeLeftFormatted);
+//    }
 }
